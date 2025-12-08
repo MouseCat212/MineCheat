@@ -1,0 +1,8 @@
+# image files
+*.png
+# system folders
+venv/
+.vscode/
+__pycache__/
+# other folders
+testing/
