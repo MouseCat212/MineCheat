@@ -1,5 +1,6 @@
 import math
 from PIL import Image
+from typing import TypeAlias
 
 GREY = ((235, 244, 249), (169, 173, 205))
 ONE = ((55, 75, 190), (140, 150, 190))
@@ -12,26 +13,47 @@ SEVEN = ((160, 0, 0), (170, 115, 135))
 EIGHT = ((165, 5, 10), (165, 100, 110))
 FLAG = ((255, 0, 0), (265, 15, 25))
 
-def getPixelDifference(px1: tuple[int, int, int], px2: tuple[int, int, int]) -> float:
-    return math.sqrt(float(px1[0]-px2[0])**2 + float(px1[1]-px2[1])**2 + float(px1[2]-px2[2])**2)
+point: TypeAlias = tuple[float | int, ...]
 
-def getDistFromLine(linePx: tuple[tuple[int, int, int], tuple[int, int, int]], point: tuple[int, int, int]) -> float:
-    a = getPixelDifference(linePx[0], point)
-    b = getPixelDifference(linePx[1], point)
-    c = getPixelDifference(*linePx)
+def calcTupleVector(point1: point, point2: point) -> point:
+    # get vector between two tuples
+    return tuple(p2 - p1 for p1, p2 in zip(point1, point2))
 
-    if linePx[0] == linePx[1]:
-        return a
+def calcTupleDot(point1: point, point2: point) -> int|float:
+    # calculate dot product between two tuples
+    return  sum(p1*p2 for p1, p2 in zip(point1, point2))
+
+def scaleTupleVector(vec: point, scale: float) -> tuple[float, ...]:
+    # scale a tuple bu a float
+    return tuple(axis * scale for axis in vec)
+
+def getDistFromLine(linePoints: tuple[point, point], point: point) -> float:
+    # check if actually a line
+    if linePoints[0] == linePoints[1]:
+        return math.dist(linePoints[0], point)
     
-    alpha = math.acos(((b*b)+(c*c)-(a*a))/(2*b*c))
-    beta = math.acos(((a*a)+(c*c)-(b*b))/(2*a*c))
+    # get vector and magnitude of line
+    lineVector = calcTupleVector(*linePoints)
+    lineMagnitude = math.dist(*linePoints)
     
-    if alpha >= (math.pi/2):
-        return b
-    elif beta >= (math.pi/2):
-        return a
-    else:
-        return b*math.sin(alpha)
+    # get vector to point
+    pointVector = calcTupleVector(linePoints[0], point)
+
+    # calculate projection onto line
+    projectionScale = calcTupleDot(pointVector, lineVector)/(lineMagnitude**2)
+
+    # check if projection is on line
+    if projectionScale <= 0:
+        return math.dist(point, linePoints[0])
+    elif projectionScale >= 1:
+        return math.dist(point, linePoints[1])
+    
+    # calculate projected point
+    scaledLineVector = scaleTupleVector(lineVector, projectionScale)
+    projectedPoint = tuple(point + vec for point, vec in zip(linePoints[0], scaledLineVector))
+
+    # return vector rejection
+    return math.dist(point, projectedPoint)
     
 def checkSquare(img: Image, coords: tuple[int, int], size: float) -> str:
     pixels = img.load()

@@ -1,9 +1,7 @@
 from PIL import Image
 from statistics import mean
 
-from functions import getPixelDifference
-
-import time
+import math
 
 DIFFERENCE_DIFF = 50
 BLACK_DIFF = 125
@@ -33,7 +31,7 @@ def getGameGrid(img: Image.Image) -> tuple[int, int, float, int, int, int, int]:
 
     # go to black, then once more
     try:
-        while getPixelDifference(px, (0, 0, 0)) > 50:
+        while math.dist(px, (0, 0, 0)) > 50:
             cent = (cent[0] + 10, cent[1] + 10)
             px = pixels[cent]
         cent = (cent[0] + 10, cent[1] + 10)
@@ -50,7 +48,7 @@ def getGameGrid(img: Image.Image) -> tuple[int, int, float, int, int, int, int]:
     for i in range(1, img.size[0]):
         px = pixels[i, cent[1]]
         # check if this pixel is significantly different from the last, and if it's close enough to black
-        if getPixelDifference(px, lastPx) > DIFFERENCE_DIFF and getPixelDifference(px, (0, 0, 0)) < BLACK_DIFF:
+        if math.dist(px, lastPx) > DIFFERENCE_DIFF and math.dist(px, (0, 0, 0)) < BLACK_DIFF:
             # check if this pixel is within buffer distance of the last edge pixel
             if len(line1) < 1 or i - line1[-1] > PX_BUFFER:
                 line1.append(i)
@@ -63,7 +61,7 @@ def getGameGrid(img: Image.Image) -> tuple[int, int, float, int, int, int, int]:
     for i in range(1, img.size[1]):
         px = pixels[cent[0], i]
         # check if this pixel is significantly different from the last, and if it's close enough to black
-        if getPixelDifference(px, lastPx) > DIFFERENCE_DIFF and getPixelDifference(px, (0, 0, 0)) < BLACK_DIFF:
+        if math.dist(px, lastPx) > DIFFERENCE_DIFF and math.dist(px, (0, 0, 0)) < BLACK_DIFF:
             # check if this pixel is within buffer distance of the last edge pixel
             if len(line2) < 1 or i - line2[-1] > PX_BUFFER:
                 line2.append(i)
