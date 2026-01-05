@@ -2,16 +2,19 @@ import math
 from PIL import Image
 from typing import TypeAlias
 
-GREY = ((235, 244, 249), (169, 173, 205))
-ONE = ((55, 75, 190), (140, 150, 190))
-TWO = ((30, 100, 0), (105, 145, 110))
-THREE = ((160, 5, 5), (155, 85, 100))
-FOUR = ((0, 0, 120), (95, 100, 160))
-FIVE = ((115, 10, 5), (155, 85, 95))
-SIX = ((0, 120, 120), (100, 165, 180))
-SEVEN = ((160, 0, 0), (170, 115, 135))
-EIGHT = ((165, 5, 10), (165, 100, 110))
-FLAG = ((255, 0, 0), (265, 15, 25))
+GREY_COL = ((235, 244, 249), (169, 173, 205))
+ONE_COL = ((55, 75, 190), (140, 150, 190))
+TWO_COL = ((30, 100, 0), (105, 145, 110))
+THREE_COL = ((160, 5, 5), (155, 85, 100))
+FOUR_COL = ((0, 0, 120), (95, 100, 160))
+FIVE_COL = ((115, 10, 5), (155, 85, 95))
+SIX_COL = ((0, 120, 120), (100, 165, 180))
+SEVEN_COL = ((160, 0, 0), (170, 115, 135))
+EIGHT_COL = ((165, 5, 10), (165, 100, 110))
+FLAG_COL = ((255, 0, 0), (265, 15, 25))
+
+UNCHECKED = 'u'
+FLAG = 'f'
 
 point: TypeAlias = tuple[float | int, ...]
 
@@ -58,39 +61,39 @@ def getDistFromLine(linePoints: tuple[point, point], point: point) -> float:
 def checkSquare(img: Image, coords: tuple[int, int], size: float) -> str:
     pixels = img.load()
     x, y = coords
-    if getDistFromLine(GREY, pixels[round(x+size*0.25), round(y+size*0.4)]) < 10:
+    if getDistFromLine(GREY_COL, pixels[round(x+size*0.25), round(y+size*0.4)]) < 10:
         # check 2
-        if getDistFromLine(TWO, pixels[round(x+size*0.5), round(y+size*0.8)]) < 20:
+        if getDistFromLine(TWO_COL, pixels[round(x+size*0.5), round(y+size*0.8)]) < 20:
             retVal = '2'
         # check 6
-        elif getDistFromLine(SIX, pixels[round(x+size*0.45), round(y+size*0.55)]) < 20:
+        elif getDistFromLine(SIX_COL, pixels[round(x+size*0.45), round(y+size*0.55)]) < 20:
             retVal = '6'
         # check 4
-        elif getDistFromLine(FOUR, pixels[round(x+size*0.75), round(y+size*0.65)]) < 20:
+        elif getDistFromLine(FOUR_COL, pixels[round(x+size*0.75), round(y+size*0.65)]) < 20:
             retVal = '4'
         # check 1
-        elif getDistFromLine(ONE, pixels[round(x+size*0.6), round(y+size*0.5)]) < 20:
+        elif getDistFromLine(ONE_COL, pixels[round(x+size*0.6), round(y+size*0.5)]) < 20:
             retVal = '1'
         # check 8
-        elif getDistFromLine(EIGHT, pixels[round(x+size*0.4), round(y+size*0.65)]) < 20:
+        elif getDistFromLine(EIGHT_COL, pixels[round(x+size*0.4), round(y+size*0.65)]) < 20:
             retVal = '8'
         # check 7
-        elif getDistFromLine(SEVEN, pixels[round(x+size*0.55), round(y+size*0.7)]) < 20:
+        elif getDistFromLine(SEVEN_COL, pixels[round(x+size*0.55), round(y+size*0.7)]) < 20:
             retVal = '7'
         # check 5
-        elif getDistFromLine(FIVE, pixels[round(x+size*0.45), round(y+size*0.4)]) < 20:
+        elif getDistFromLine(FIVE_COL, pixels[round(x+size*0.45), round(y+size*0.4)]) < 20:
             retVal = '5'
         # check 3
-        elif getDistFromLine(THREE, pixels[round(x+size*0.7), round(y+size*0.4)]) < 20:
+        elif getDistFromLine(THREE_COL, pixels[round(x+size*0.7), round(y+size*0.4)]) < 20:
             retVal = '3'
         else:
             retVal = '0'
     else:
         # check for flag
-        if getDistFromLine(FLAG, pixels[round(x+size*0.45), round(y+size*0.3)]) < 20:
-            retVal = 'f'
+        if getDistFromLine(FLAG_COL, pixels[round(x+size*0.45), round(y+size*0.3)]) < 20:
+            retVal = FLAG
         else:
             # unclicked square
-            retVal = 'u'
+            retVal = UNCHECKED
     
     return retVal
