@@ -1,14 +1,17 @@
-import PIL
-import PIL.ImageDraw
+from PIL import Image, ImageDraw
 
 from pywintypes import error
 from statistics import StatisticsError
+
+from itertools import count
+
+from dataclasses import dataclass
 
 import sys
 
 from getScreenshot import getWindowScreenshot
 from getGrid import getGameGrid
-from functions import checkSquare
+from functions import checkSquare, UNCHECKED, FLAG
 
 ADJACENT = [
     (0, -1),
@@ -21,221 +24,233 @@ ADJACENT = [
     (-1, -1)
 ]
 
-if __name__ == "__main__":
-    # get game screenshot
+@dataclass
+class Zone:
+    bombs: int
+    squares: set[tuple[int, int]]
+
+# functions to wrap error handling
+def safeGetScreenshot():
     try:
-        img = getWindowScreenshot()
+        return getWindowScreenshot()
     except error as ex:
-        if ex.args[0] == 1400 and ex.args[2] == 'Invalid window handle.':
+        args = ex.args or ()
+        code = args[0] if len(args) >= 1 else None
+        msg = args[2] if len(args) >= 3 else ""
+        if code == 1400 and 'Invalid window handle' in msg:
             print("Minesweeper not open. Please ensure game is running.")
-            exit()
+            sys.exit(1)
         else:
             raise ex
+
+def safeGetGrid(img: Image.Image):
+    try:
+        return getGameGrid(img)
+    except StatisticsError:
+        print("Error: Minesweeper is minimised.")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    # get game screenshot
+    img = safeGetScreenshot()
     lastImgSize = img.size
 
     # get game bounds and config
-    try:
-        width, height, boxSide, top, bottom, left, right = getGameGrid(img)
-    except StatisticsError:
-        print("Error: Minesweeper is minimised.")
-        exit()
+    width, height, boxSide, top, bottom, left, right = safeGetGrid(img)
     
     # check if window size and position are pre-defined
     if len(sys.argv) >= 3:
-        width = int(sys.argv[1])
-        height = int(sys.argv[2])
-        if len(sys.argv) >= 7:
-            left = int(sys.argv[3])
-            top = int(sys.argv[4])
-            right = int(sys.argv[5])
-            bottom = int(sys.argv[6])
-        boxSide = (((right-left)/width) + ((bottom-top)/height))/2
-
-    # create lists of squares
-    unchecked: list[tuple[int, int]] = []
-    unsolved: list[tuple[int, int]] = []
+        try:
+            width = int(sys.argv[1])
+            height = int(sys.argv[2])
+            if len(sys.argv) >= 7:
+                left = int(sys.argv[3])
+                top = int(sys.argv[4])
+                right = int(sys.argv[5])
+                bottom = int(sys.argv[6])
+                # check in bounds:
+                if not (0 <= left < img.size[0] and 
+                        0 <= right < img.size[0] and
+                        0 <= top < img.size[1] and
+                        0 <= bottom < img.size[1]):
+                    print("Error, specified bounds outside image bounds.")
+                    sys.exit(1)
+            boxSide = (((right-left)/width) + ((bottom-top)/height))/2
+        except ValueError:
+            print("All positional arguments must be integers.")
+            sys.exit(1)
 
     # create grid, all squares are unchecked
-    grid: list[list[tuple[str]]] = []
-    for x in range(width):
-        grid.append([])
-        for y in range(height):
-            grid[x].append('u')
-            unchecked.append((x, y))
+    grid = [[UNCHECKED for _ in range(height)] for _ in range(width)]
+    
+    # create lists of squares
+    unchecked = {(x, y) for x in range(width) for y in range(height)}
+    unsolved: set[tuple[int, int]] = set()
 
     bTurn = True
 
     while bTurn:
         ## do turn
         # get new screenshot
-        try:
-            img = getWindowScreenshot()
-        except error as ex:
-            if ex.args[0] == 1400 and ex.args[2] == 'Invalid window handle.':
-                print("Minesweeper not open. Please ensure game is running.")
-                exit()
-            else:
-                raise ex
+        img = safeGetScreenshot()
 
         # check if window has been resized
         if img.size != lastImgSize:
-            try:
-                # update values
-                _, _, _, top, bottom, left, right = getGameGrid(img)
-                # recalculate boxside to allow for errors in edge detection
-                boxSide = (((right-left)/width) + ((bottom-top)/height))/2
-            except StatisticsError:
-                print("Error: Minesweeper is minimised.")
-                exit()
+            _, _, _, top, bottom, left, right = safeGetGrid(img)
+            boxSide = (((right-left)/width) + ((bottom-top)/height))/2
             lastImgSize = img.size
-        imgMod = PIL.ImageDraw.Draw(img)
 
         # check all unchecked squares
-        indexToRemove: list[int] = []
-        for i in range(len(unchecked)):
-            squareVal = checkSquare(img, (left + (unchecked[i][0]*boxSide), top + (unchecked[i][1]*boxSide)), boxSide)
-            if squareVal != 'u':
-                if squareVal != 'f' and squareVal != '0':
+        coordsToRemove: set[tuple[int, int]] = set()
+        for coords in unchecked:
+            squareVal = checkSquare(img, (left + round(coords[0]*boxSide), top + round(coords[1]*boxSide)), boxSide)
+            if squareVal != UNCHECKED:
+                if squareVal != FLAG and squareVal != '0':
                     # square is unsolved
-                    unsolved.append(unchecked[i])
+                    unsolved.add(coords)
                 # update value in grid
-                grid[unchecked[i][0]][unchecked[i][1]] = squareVal
-                indexToRemove.append(i)
-        for i in reversed(indexToRemove):
-            unchecked.pop(i)
+                grid[coords[0]][coords[1]] = squareVal
+                coordsToRemove.add(coords)
+        unchecked -= coordsToRemove
 
         # create zones
-        zonedSquares: dict[tuple[int, int], list[str]] = {}
-        zones: dict[str, tuple[int, list[tuple[int, int]]]] = {}
-        indexToRemove = []
-        for i in range(len(unsolved)):
-            coords = unsolved[i]
+        zonedSquares: dict[
+            tuple[int, int],
+            set[int]
+        ] = {}
+        zones: dict[
+            int,
+            Zone
+        ] = {}
+        zoneKey = count(0)
+
+        coordsToRemove = set()
+        for coords in unsolved:
             bombCount = int(grid[coords[0]][coords[1]])
-            tempZonedSquares: list[tuple[int, int]] = []
+            tempZonedSquares: set[tuple[int, int]] = set()
             # check all adjacent squares
             for adj in ADJACENT:
                 adjCoords = (coords[0]+adj[0], coords[1]+adj[1])
-                if adjCoords[0] >= width or adjCoords[0] < 0 or adjCoords[1] >= height or adjCoords[1] < 0:
+                if not (0 <= adjCoords[0] < width and 0 <= adjCoords[1] < height):
                     # coords out of grid bounds
                     continue
                 squareVal = grid[adjCoords[0]][adjCoords[1]]
-                if squareVal == 'f':
+                if squareVal == FLAG:
                     # bomb accounted for, 1 less to find in zone
                     bombCount -= 1
-                elif squareVal == 'u':
-                    tempZonedSquares.append(adjCoords)
+                elif squareVal == UNCHECKED:
+                    tempZonedSquares.add(adjCoords)
             if len(tempZonedSquares) == 0:
                 # no unsolved squares adjacent, mark as solved
-                indexToRemove.append(i)
+                coordsToRemove.add(coords)
             else:
                 # add new zone
-                key = str(coords[0])+'-'+str(coords[1])
-                zones[key] = (bombCount, tempZonedSquares)
+                key = next(zoneKey)
+                zones[key] = Zone(bombCount, tempZonedSquares)
 
                 # add square to zoned squares or add zone to square if already exists
                 for square in tempZonedSquares:
                     if square in zonedSquares:
-                        zonedSquares[square] = [*zonedSquares[square], key]
+                        zonedSquares[square].add(key)
                     else:
-                        zonedSquares[square] = [key]
+                        zonedSquares[square] = {key}
         
         # removed solved squares from unsolved list
-        for i in reversed(indexToRemove):
-            unsolved.pop(i)
+        unsolved -= coordsToRemove
         
         # decompose zones (remove overlap where possible)
-        squaresChanged = True
-        while squaresChanged:
-            squaresChanged = False
-            # decompose 100% and 0%
-            for square in zonedSquares:
-                # check each zone applied to square for 0 or 100 percent bomb chance
-                for z in zonedSquares[square]:
-                    zone = zones[z]
-                    bombChance = zone[0]/len(zone[1])
-                    if (bombChance == 0 or bombChance == 1) and len(zonedSquares[square]) > 1:
-                        # remove and update all other zones
-                        for z1 in zonedSquares[square]:
-                            if z1 != z:
-                                zones[z1] = (
-                                    zones[z1][0] - bombChance, # number of bombs in new zone
-                                    [s for s in zones[z1][1] if s != square] # squares in new zone
-                                )
-                        zonedSquares[square] = [z]
-                        squaresChanged = True
-                        break # there's only one zone on this square now. Don't bother checking any more
-                else:
-                    # no 0 or 100 found, check for overlap to decompose
-                    checkedZones: set[str] = set()
-                    while not set(zonedSquares[square]).issubset(checkedZones):
-                        # get base zone for comparison
-                        for key1 in zonedSquares[square]:
-                            if key1 not in checkedZones:
+        squaresSet = set(zonedSquares)
+        while len(squaresSet) != 0:
+            changedSquares: set[tuple[int, int]] = set()
+
+            square = squaresSet.pop()
+            # check each zone applied to square for 0 or 100 percent bomb chance
+            for z in zonedSquares[square]:
+                if (zones[z].bombs == 0 or zones[z].bombs == len(zones[z].squares)) and len(zonedSquares[square]) > 1:
+                    # remove and update all other zones
+                    for z1 in zonedSquares[square] - {z}:
+                        squareSet = {square}
+                        changedSquares |= zones[z1].squares - squareSet
+                        if zones[z].bombs != 0:
+                            zones[z1].bombs -= 1
+                        zones[z1].squares -= squareSet
+
+                    zonedSquares[square] = {z}
+                    break # there's only one zone on this square now. Don't bother checking any more
+            else:
+                # no 0 or 100 found, check for overlap to decompose
+                checkedZones: set[int] = set()
+                while not zonedSquares[square].issubset(checkedZones):
+                    # get base zone for comparison
+                    for k1 in zonedSquares[square]:
+                        if k1 not in checkedZones:
+                            break
+                    checkedZones.add(k1)
+
+                    # get second zone for comparison
+                    bSolved = False
+                    for k2 in zonedSquares[square]:
+                        if k2 not in checkedZones:
+                            overlap = zones[k1].squares & zones[k2].squares
+
+                            # get minimum number of mines in overlap
+                            zone1Potential = zones[k1].bombs - (len(zones[k1].squares) - len(overlap))
+                            zone2Potential = zones[k2].bombs - (len(zones[k2].squares) - len(overlap))
+                            potential = max(zone1Potential, zone2Potential)
+
+                            # check if one zone is solved by overlap
+                            if potential == zones[k1].bombs or potential == zones[k2].bombs:
+                                checkedZones.add(k2)
+                                # update zones
+                                changedSquares |= zones[k1].squares
+                                changedSquares |= zones[k2].squares
+                                bSolved = True
                                 break
-                        checkedZones.add(key1)
+                    
+                    if bSolved:
+                        # create new zone
+                        newKey = next(zoneKey)
+                        zones[newKey] = Zone(potential, overlap)
 
-                        # get second zone for comparison
-                        for key2 in zonedSquares[square]:
-                            if key2 not in checkedZones:
-                                break
-                        else:
-                            # base zone is last in list
-                            continue
+                        zones[k1].bombs -= potential
+                        zones[k1].squares -= overlap
 
-                        zone1 = zones[key1]
-                        zone2 = zones[key2]
+                        zones[k2].bombs -= potential
+                        zones[k2].squares -= overlap
 
-                        overlap = [s for s in zone1[1] if s in zone2[1]]
+                        for square in overlap:
+                            # remove existing zones from square
+                            zoneSet = zonedSquares[square]
+                            zoneSet.discard(k1)
+                            zoneSet.discard(k2)
+                            # add new zone to square
+                            zoneSet.add(newKey)
+                            zonedSquares[square] = zoneSet
 
-                        # get minimum number of mines in overlap
-                        zone1Potential = zone1[0] - (len(zone1[1]) - len(overlap))
-                        zone2Potential = zone2[0] - (len(zone2[1]) - len(overlap))
-                        potential = max(zone1Potential, zone2Potential)
-
-                        # check if one zone is solved by overlap
-                        if potential == zone1[0] or potential == zone2[0]:
-                            # create new zone
-                            newKey = key1+"_"+key2
-                            zones[newKey] = (potential, overlap)
-                            zone1Squares = zone1[1]
-                            zone2Squares = zone2[1]
-
-                            for square in overlap:
-                                # remove square from existing zones
-                                zone1Squares.remove(square)
-                                zone2Squares.remove(square)
-                                # remove existing zones from square
-                                zoneList = zonedSquares[square]
-                                zoneList.remove(key1)
-                                zoneList.remove(key2)
-                                # add new zone to square
-                                zoneList.append(newKey)
-                                zonedSquares[square] = zoneList
-
-                            zones[key1] = (zone1[0]-potential, zone1Squares)
-                            zones[key2] = (zone2[0]-potential, zone2Squares)
-                            squaresChanged = True
+            # add new squares to check
+            squaresSet |= changedSquares
         
         # report on bombs
         if len(zonedSquares) > 0:
+            imgMod = ImageDraw.Draw(img)
+
             for square in zonedSquares:
-                xPos = left+square[0]*boxSide
-                yPos = top+square[1]*boxSide
+                xPos = round(left+square[0]*boxSide)
+                yPos = round(top+square[1]*boxSide)
                 chances = []
                 for z in zonedSquares[square]:
-                    zone = zones[z]
-                    bombChance = float(zone[0])/len(zone[1])
-                    chances.append(bombChance)
+                    chances.append(zones[z].bombs/len(zones[z].squares))
                 
-                if float(1) in chances:
+                if 1.0 in chances:
                     # 100 percent chance of bomb, mark red
                     imgMod.rectangle((xPos + round(boxSide*0.1), yPos + round(boxSide*0.1), xPos + round(boxSide*0.9), yPos + round(boxSide*0.9)), fill="red")
-                elif float(0) in chances:
+                elif 0.0 in chances:
                     # 0 percent chance of bomb, mark green
                     imgMod.rectangle((xPos + round(boxSide*0.1), yPos + round(boxSide*0.1), xPos + round(boxSide*0.9), yPos + round(boxSide*0.9)), fill="green")
                 else:
-                    # mark hightest percentage chance of bomb
+                    # mark highest percentage chance of bomb
                     imgMod.text((xPos + round(boxSide/10), yPos + round(boxSide/10)), f"{max(chances):.2f}", fill="black")
+            
             img.show()
 
         
@@ -244,10 +259,7 @@ if __name__ == "__main__":
             bTurn = False
         elif 'r' in cont.lower():
             # reset lists
-            unchecked = []
-            unsolved = []
-            # reset grid to all unsolved
-            for x in range(width):
-                for y in range(height):
-                    grid[x][y] = 'u'
-                    unchecked.append((x,y))
+            unsolved.clear()
+            # reset grid to all unchecked
+            grid = [[UNCHECKED for _ in range(height)] for _ in range(width)]
+            unchecked = {(x, y) for x in range(width) for y in range(height)}
